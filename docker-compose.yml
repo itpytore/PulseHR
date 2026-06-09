@@ -1,0 +1,10 @@
+services:
+  pulsehr:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      SECRET_KEY: change-me
+      DATABASE_URL: sqlite:///pulsehr.db
+    volumes:
+      - ./instance:/app/instance
