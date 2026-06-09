@@ -1,0 +1,137 @@
+{# templates/profile.html
+   Профиль сотрудника: редактирование личных данных +
+   настройка каналов уведомлений (toggle-переключатели).
+   Маршрут Flask: GET/POST /profile
+#}
+{% extends "base.html" %}
+{% block title %}Профиль — PulseHR{% endblock %}
+
+{% block content %}
+<div style="max-width:580px">
+  <h1 style="margin-bottom:28px">Профиль</h1>
+
+  {# ── Личные данные ── #}
+  <div class="card mb24">
+    <h3 style="margin-bottom:20px">Личные данные</h3>
+    <form method="POST" action="{{ url_for('profile') }}">
+
+      <div class="form-row">
+        <div class="field">
+          <label>Имя</label>
+          <input type="text" name="name" value="{{ user.name or '' }}">
+        </div>
+        <div class="field">
+          <label>Email</label>
+          <input type="email" name="email" value="{{ user.email or '' }}">
+        </div>
+        <div class="field">
+          <label>Подразделение</label>
+          <input type="text" name="department" value="{{ user.department or '' }}">
+        </div>
+        <div class="field">
+          <label>Должность</label>
+          <input type="text" name="position" value="{{ user.position or '' }}">
+        </div>
+        <div class="field">
+          <label>Город</label>
+          <input type="text" name="city" value="{{ user.city or '' }}">
+        </div>
+        <div class="field">
+          <label>Телефон</label>
+          <input type="text" value="{{ user.phone }}" disabled style="opacity:.5">
+        </div>
+        <div class="field">
+          <label>Имя пользователя в Telegram (username)</label>
+          <input type="text" name="tg_username" value="{{ user.tg_username or '' }}">
+        </div>
+      </div>
+
+      {# ── Уведомления ── #}
+      <h3 style="margin:20px 0 14px">🔔 Уведомления</h3>
+
+      <div style="background:var(--bg3);border-radius:var(--rsm);padding:14px 16px;
+                  display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div>
+          <div style="font-weight:500">Получать уведомления</div>
+          <div style="font-size:12px;color:var(--text3)">Общее разрешение</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" name="consent_notifications"
+                 id="master-toggle"
+                 {{ 'checked' if user.consent_notifications }}
+                 onchange="toggleChannels(this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div id="channels" style="{{ '' if user.consent_notifications else 'opacity:.4;pointer-events:none' }}">
+        {% set channels = [
+          ('notify_push',     '🌐', 'Web Push',  'Уведомления в браузере (основной канал)'),
+          ('notify_telegram', '✈️', 'Telegram',  'Привяжите Telegram в личном кабинете'),
+          ('notify_sms',      '📱', 'SMS',        'Резервный канал'),
+          ('notify_email',    '📧', 'Email',       'Корпоративная почта'),
+        ] %}
+        {% for field, icon, label, desc in channels %}
+        <div style="background:var(--bg3);border-radius:var(--rsm);padding:12px 16px;
+                    display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="display:flex;gap:12px;align-items:center">
+            <span style="font-size:20px">{{ icon }}</span>
+            <div>
+              <div style="font-weight:500;font-size:14px">{{ label }}</div>
+              <div style="font-size:12px;color:var(--text3)">{{ desc }}</div>
+            </div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" name="{{ field }}" {{ 'checked' if user[field] }}>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        {% endfor %}
+      </div>
+
+      <div style="margin-top:12px;padding:10px 14px;background:var(--orangebg);border-radius:var(--rsm);
+                  font-size:12px;color:var(--orange)">
+        ⚠️ Критичные опросы доставляются всегда независимо от настроек.
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;margin-top:20px">
+        <button type="submit" class="btn btn-primary">Сохранить</button>
+      </div>
+    </form>
+  </div>
+
+  {# ── Push-подписки устройств ── #}
+  {% if push_subs %}
+  <div class="card">
+    <h3 style="margin-bottom:16px">📱 Активные устройства (Push)</h3>
+    {% for sub in push_subs %}
+    <div style="background:var(--bg3);border-radius:var(--rsm);padding:12px 16px;
+                display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div>
+        <div style="font-size:13px;font-weight:500">{{ sub.device_name[:60] if sub.device_name else 'Устройство' }}</div>
+        <div style="font-size:11px;color:var(--text3)">Добавлено: {{ sub.created_at.strftime('%d.%m.%Y') }}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm"
+              onclick="removeSub('{{ sub.endpoint }}', this)">Удалить</button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleChannels(checked) {
+  document.getElementById('channels').style.opacity       = checked ? '1' : '.4';
+  document.getElementById('channels').style.pointerEvents = checked ? 'auto' : 'none';
+}
+
+async function removeSub(endpoint, btn) {
+  btn.disabled = true;
+  const res = await postJSON('/api/push/unsubscribe', { endpoint });
+  if ((await res.json()).ok) btn.closest('div').remove();
+}
+</script>
+{% endblock %}

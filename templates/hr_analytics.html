@@ -1,0 +1,384 @@
+{% extends "base.html" %}
+
+{% block title %}HR Аналитика — PulseHR{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+    <h1>📊 Аналитика опросов</h1>
+</div>
+
+<div class="card mb24">
+    <div class="form-row">
+
+
+    <div class="field">
+        <label>Опрос</label>
+        <select id="surveySelect">
+            <option value="">Выберите опрос</option>
+            {% for survey in surveys %}
+            <option value="{{ survey.id }}">
+                {{ survey.title }}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="field">
+        <label>Подразделение</label>
+        <select id="deptFilter">
+            <option value="">Все подразделения</option>
+        </select>
+    </div>
+
+    <div class="field">
+        <label>Должность</label>
+        <select id="positionFilter">
+            <option value="">Все должности</option>
+        </select>
+    </div>
+
+    <div class="field" style="display:flex;align-items:flex-end">
+        <button class="btn btn-primary" onclick="loadAnalytics()">
+            Обновить
+        </button>
+    </div>
+
+</div>
+
+
+</div>
+
+<div id="analyticsWrapper" style="display:none">
+
+
+<div class="stats-grid mb24">
+
+    <div class="card">
+        <div class="stat-value" id="totalResponses">0</div>
+        <div class="stat-label">Ответов</div>
+    </div>
+
+    <div class="card">
+        <div class="stat-value" id="completionRate">0%</div>
+        <div class="stat-label">Процент прохождения</div>
+    </div>
+
+    <div class="card">
+        <div class="stat-value" id="targetSize">0</div>
+        <div class="stat-label">Целевая аудитория</div>
+    </div>
+
+</div>
+
+<div class="grid-2 mb24">
+
+    <div class="card">
+        <h3>Динамика ответов</h3>
+        <canvas id="timelineChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3>Подразделения</h3>
+        <canvas id="deptChart"></canvas>
+    </div>
+
+</div>
+
+<div class="grid-2 mb24">
+
+    <div class="card">
+        <h3>Должности</h3>
+        <canvas id="positionChart"></canvas>
+    </div>
+
+    <div class="card">
+        <h3>Уведомления</h3>
+        <canvas id="channelChart"></canvas>
+    </div>
+
+</div>
+
+<div id="questionsContainer"></div>
+
+
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+
+<script>
+
+let timelineChart = null;
+let deptChart = null;
+let positionChart = null;
+let channelChart = null;
+
+function destroyChart(chart){
+    if(chart){
+        chart.destroy();
+    }
+}
+
+async function loadAnalytics(){
+
+    const surveyId = document.getElementById("surveySelect").value;
+
+    if(!surveyId){
+        return;
+    }
+
+    const dept =
+        document.getElementById("deptFilter").value;
+
+    const position =
+        document.getElementById("positionFilter").value;
+
+    const params = new URLSearchParams();
+
+    if(dept){
+        params.append("filter_dept", dept);
+    }
+
+    if(position){
+        params.append("filter_position", position);
+    }
+
+    const response = await fetch(
+        `/hr/analytics/${surveyId}?${params.toString()}`
+    );
+
+    const data = await response.json();
+
+    document.getElementById("analyticsWrapper").style.display = "block";
+
+    document.getElementById("totalResponses").innerText =
+        data.total_responses;
+
+    document.getElementById("completionRate").innerText =
+        data.completion_rate + "%";
+
+    document.getElementById("targetSize").innerText =
+        data.target_size;
+
+    updateFilters(data);
+
+    renderTimeline(data.timeline);
+    renderDeptChart(data.dept_distribution);
+    renderPositionChart(data.position_distribution);
+    renderChannelChart(data.notification_channels);
+    renderQuestions(data.questions);
+}
+
+function updateFilters(data){
+
+    const deptSelect =
+        document.getElementById("deptFilter");
+
+    const posSelect =
+        document.getElementById("positionFilter");
+
+    const currentDept = deptSelect.value;
+    const currentPos = posSelect.value;
+
+    deptSelect.innerHTML =
+        '<option value="">Все подразделения</option>';
+
+    posSelect.innerHTML =
+        '<option value="">Все должности</option>';
+
+    data.available_depts.forEach(d => {
+        deptSelect.innerHTML +=
+        `<option value="${d}">${d}</option>`;
+    });
+
+    data.available_positions.forEach(p => {
+        posSelect.innerHTML +=
+        `<option value="${p}">${p}</option>`;
+    });
+
+    deptSelect.value = currentDept;
+    posSelect.value = currentPos;
+}
+
+function renderTimeline(items){
+
+    destroyChart(timelineChart);
+
+    timelineChart = new Chart(
+        document.getElementById("timelineChart"),
+        {
+            type: "bar",
+            data: {
+                labels: items.map(i => i.date),
+                datasets: [{
+                    label: "Ответы",
+                    data: items.map(i => i.count)
+                }]
+            }
+        }
+    );
+}
+
+function renderDeptChart(data){
+
+    destroyChart(deptChart);
+
+    deptChart = new Chart(
+        document.getElementById("deptChart"),
+        {
+            type: "pie",
+            data: {
+                labels: Object.keys(data),
+                datasets: [{
+                    data: Object.values(data)
+                }]
+            }
+        }
+    );
+}
+
+function renderPositionChart(data){
+
+    destroyChart(positionChart);
+
+    positionChart = new Chart(
+        document.getElementById("positionChart"),
+        {
+            type: "pie",
+            data: {
+                labels: Object.keys(data),
+                datasets: [{
+                    data: Object.values(data)
+                }]
+            }
+        }
+    );
+}
+
+function renderChannelChart(data){
+
+    destroyChart(channelChart);
+
+    const labels = Object.keys(data);
+
+    channelChart = new Chart(
+        document.getElementById("channelChart"),
+        {
+            type: "bar",
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: "Отправлено",
+                        data: labels.map(
+                            l => data[l].sent
+                        )
+                    },
+                    {
+                        label: "Клики",
+                        data: labels.map(
+                            l => data[l].clicked
+                        )
+                    }
+                ]
+            }
+        }
+    );
+}
+
+function renderQuestions(questions){
+
+    const container =
+        document.getElementById("questionsContainer");
+
+    container.innerHTML = "";
+
+    questions.forEach((q, index) => {
+
+        const block = document.createElement("div");
+
+        block.className = "card mb24";
+
+        let html = `
+            <h3>${index + 1}. ${q.text}</h3>
+            <div style="margin-bottom:16px">
+                Ответов: ${q.answer_count}
+            </div>
+        `;
+
+        if(q.average !== undefined){
+
+            html += `
+                <div class="alert alert-info">
+                    Средняя оценка: <b>${q.average}</b>
+                    ${q.enps !== undefined
+                        ? ` | eNPS: <b>${q.enps}</b>`
+                        : ""}
+                </div>
+            `;
+        }
+
+        html += `
+            <canvas id="qchart_${q.id}"
+                    height="120"></canvas>
+        `;
+
+        if(q.text_answers){
+
+            html += `
+                <div style="margin-top:20px">
+                    <h4>Текстовые ответы</h4>
+                    <ul>
+                        ${q.text_answers
+                            .map(a => `<li>${a}</li>`)
+                            .join("")}
+                    </ul>
+                </div>
+            `;
+        }
+
+        block.innerHTML = html;
+
+        container.appendChild(block);
+
+        if(q.distribution){
+
+            setTimeout(() => {
+
+                new Chart(
+                    document.getElementById(
+                        `qchart_${q.id}`
+                    ),
+                    {
+                        type: "bar",
+                        data: {
+                            labels:
+                                Object.keys(
+                                    q.distribution
+                                ),
+                            datasets: [{
+                                label: "Количество",
+                                data:
+                                    Object.values(
+                                        q.distribution
+                                    )
+                            }]
+                        }
+                    }
+                );
+
+            }, 10);
+        }
+
+    });
+}
+
+document
+.getElementById("surveySelect")
+.addEventListener("change", loadAnalytics);
+
+</script>
+
+{% endblock %}

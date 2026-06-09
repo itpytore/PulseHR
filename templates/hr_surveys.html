@@ -1,0 +1,94 @@
+{# templates/hr_surveys.html
+   HR: список всех опросов с управлением статусами.
+   Кнопки: Опубликовать / Завершить / Архивировать — отправляют POST-форму.
+   Маршрут Flask: GET /hr/surveys
+#}
+{% extends "base.html" %}
+{% block title %}Управление опросами — PulseHR{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Управление опросами</h1>
+  <a href="{{ url_for('hr_create_survey') }}" class="btn btn-primary">+ Создать опрос</a>
+</div>
+
+{% if surveys %}
+<div class="gap-col">
+  {% for s in surveys %}
+  <div class="card card-sm">
+    <div style="display:flex;align-items:flex-start;gap:16px">
+      <div style="flex:1">
+        <div class="gap-row" style="margin-bottom:6px">
+          <span style="font-weight:600;font-size:15px">{{ s.title }}</span>
+
+          {% if s.status == 'draft' %}
+            <span class="badge badge-default">Черновик</span>
+          {% elif s.status == 'active' %}
+            <span class="badge badge-green">● Активный</span>
+          {% elif s.status == 'completed' %}
+            <span class="badge badge-accent">Завершён</span>
+          {% else %}
+            <span class="badge badge-default">Архив</span>
+          {% endif %}
+
+          {% if s.is_anonymous %}<span class="badge badge-accent">Анонимный</span>{% endif %}
+          {% if s.is_critical %}<span class="badge badge-orange">Критичный</span>{% endif %}
+        </div>
+
+        <div style="font-size:13px;color:var(--text3);display:flex;gap:16px;flex-wrap:wrap">
+          <span>📊 {{ s.response_count() }} ответов</span>
+          {% if s.ends_at %}<span>📅 до {{ s.ends_at.strftime('%d.%m.%Y') }}</span>{% endif %}
+          <span>⏱ ~{{ s.estimated_minutes }} мин.</span>
+          <span>📅 создан {{ s.created_at.strftime('%d.%m.%Y') }}</span>
+        </div>
+      </div>
+
+      <div class="gap-row">
+        {# Редактировать #}
+        {% if s.status in ('draft', 'active') %}
+        <a href="{{ url_for('hr_edit_survey', survey_id=s.id) }}" class="btn btn-ghost btn-sm">
+          ✏️ Редактировать
+        </a>
+        {% endif %}
+
+        {# Переход статусов #}
+        {% if s.status == 'draft' %}
+        <form method="POST" action="{{ url_for('hr_change_status', survey_id=s.id) }}" style="display:inline">
+          <input type="hidden" name="status" value="active">
+          <button type="submit" class="btn btn-success btn-sm"
+                  onclick="return confirm('Опубликовать опрос и отправить уведомления?')">
+            ▶ Опубликовать
+          </button>
+        </form>
+
+        {% elif s.status == 'active' %}
+        <form method="POST" action="{{ url_for('hr_change_status', survey_id=s.id) }}" style="display:inline">
+          <input type="hidden" name="status" value="completed">
+          <button type="submit" class="btn btn-ghost btn-sm"
+                  onclick="return confirm('Завершить опрос?')">
+            ⏹ Завершить
+          </button>
+        </form>
+        <a href="{{ url_for('hr_analytics_detail', survey_id=s.id) }}"
+           class="btn btn-ghost btn-sm" target="_blank">📊 Статистика</a>
+
+        {% elif s.status == 'completed' %}
+        <form method="POST" action="{{ url_for('hr_change_status', survey_id=s.id) }}" style="display:inline">
+          <input type="hidden" name="status" value="archived">
+          <button type="submit" class="btn btn-ghost btn-sm">📦 В архив</button>
+        </form>
+        <a href="{{ url_for('hr_analytics_detail', survey_id=s.id) }}"
+           class="btn btn-ghost btn-sm" target="_blank">📊 Статистика</a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <div class="ico">📋</div>
+  Опросов пока нет. <a href="{{ url_for('hr_create_survey') }}">Создайте первый!</a>
+</div>
+{% endif %}
+{% endblock %}

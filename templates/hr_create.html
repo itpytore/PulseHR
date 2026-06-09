@@ -1,0 +1,375 @@
+{# templates/hr_create.html
+   HR: конструктор опроса.
+   Используется и для создания (GET /hr/surveys/create),
+   и для редактирования (GET /hr/surveys/<id>/edit).
+   Добавление/удаление вопросов через обычные POST-формы.
+#}
+{% extends "base.html" %}
+{% block title %}{{ 'Редактировать' if survey else 'Создать' }} опрос — PulseHR{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>{{ 'Редактировать: ' + survey.title if survey else 'Создать опрос' }}</h1>
+  {% if survey %}
+  <a href="{{ url_for('hr_surveys') }}" class="btn btn-ghost">← К списку</a>
+  {% endif %}
+</div>
+
+{# ── Настройки опроса (только для нового) ── #}
+{% if not survey %}
+<div class="card mb24">
+  <h3 style="margin-bottom:20px">Настройки опроса</h3>
+  <form method="POST" action="{{ url_for('hr_create_survey') }}">
+
+    <div class="field">
+      <label>Название *</label>
+      <input type="text" name="title" required placeholder="Пример: eNPS Q2 2025">
+    </div>
+    <div class="field">
+      <label>Описание</label>
+      <textarea name="description" rows="2" placeholder="Краткое пояснение для сотрудников"></textarea>
+    </div>
+
+    <div class="form-row">
+      <div class="field">
+        <label>Дата окончания</label>
+        <input type="datetime-local" name="ends_at">
+      </div>
+      <div class="field">
+        <label>Время прохождения (мин.)</label>
+        <input type="number" name="estimated_minutes" value="5" min="1">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="field">
+        <label>Роли (через запятую, пусто = все)</label>
+        <input type="text" name="target_roles" placeholder="employee, hr">
+      </div>
+      <div class="field">
+        <label>Подразделения (через запятую)</label>
+        <input type="text" name="target_depts" placeholder="Разработка, Продажи">
+      </div>
+    </div>
+
+    <div style="display:flex;gap:24px;margin-bottom:20px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:0">
+        <input type="checkbox" name="is_anonymous"> <span>Анонимный опрос</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:0">
+        <input type="checkbox" name="is_critical"> <span>Критичный (уведомления нельзя отключить)</span>
+      </label>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Создать черновик →</button>
+  </form>
+</div>
+{% endif %}
+
+{# ── Вопросы (только для существующего опроса) ── #}
+{% if survey %}
+<div class="card mb24">
+  <h3 style="margin-bottom:8px">Информация</h3>
+  <div style="font-size:13px;color:var(--text2);display:flex;gap:20px;flex-wrap:wrap">
+    <span>📅 {{ survey.ends_at.strftime('%d.%m.%Y') if survey.ends_at else 'Без срока' }}</span>
+    <span>⏱ ~{{ survey.estimated_minutes }} мин.</span>
+    {% if survey.is_anonymous %}<span>🔒 Анонимный</span>{% endif %}
+    {% if survey.is_critical %}<span>🚨 Критичный</span>{% endif %}
+  </div>
+</div>
+
+{# Список добавленных вопросов #}
+<div class="card mb24">
+  <h3 style="margin-bottom:16px">Вопросы ({{ questions|length }})</h3>
+
+  {% if questions %}
+  <div class="gap-col mb16">
+    {% for q in questions %}
+    <div style="background:var(--bg3);border-radius:var(--rsm);padding:12px 16px;
+                display:flex;gap:12px;align-items:flex-start">
+      <span style="color:var(--text3);font-size:13px;padding-top:2px;min-width:24px">{{ loop.index }}.</span>
+      <div style="flex:1">
+        <div style="font-weight:500;margin-bottom:3px">{{ q.text }}</div>
+        <div style="font-size:12px;color:var(--text3)">
+          {% set type_labels = {'single': 'Одиночный выбор', 'multiple': 'Множественный выбор',
+                                'scale': 'Шкала (eNPS)', 'text': 'Текстовый', 'matrix': 'Матрица'} %}
+          {{ type_labels.get(q.type, q.type) }}
+          {% if q.options() and q.type not in ('scale', 'text') %}
+            · {{ q.options()|length if q.type != 'matrix' else (q.options().rows|length if q.options().rows is defined else 0) }} вариантов
+          {% endif %}
+          {% if q.condition() %} · <em>Условный</em>{% endif %}
+        </div>
+      </div>
+      {% if q.is_required %}<span style="font-size:11px;color:var(--red);padding-top:2px">*</span>{% endif %}
+      <form method="POST" action="{{ url_for('hr_edit_survey', survey_id=survey.id) }}" style="display:inline">
+        <input type="hidden" name="action" value="delete_question">
+        <input type="hidden" name="question_id" value="{{ q.id }}">
+        <button type="submit" class="btn btn-ghost btn-sm"
+                onclick="return confirm('Удалить вопрос?')" style="color:var(--red)">✕</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty" style="padding:24px"><div class="ico">❓</div>Добавьте хотя бы один вопрос</div>
+  {% endif %}
+
+  {# Форма добавления вопроса #}
+  <div id="add-q-toggle">
+    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('add-q-form').style.display='block';this.style.display='none'">
+      + Добавить вопрос
+    </button>
+  </div>
+
+  <div id="add-q-form" style="display:none;background:var(--bg3);border-radius:var(--rsm);padding:16px;margin-top:12px">
+    <form method="POST" action="{{ url_for('hr_edit_survey', survey_id=survey.id) }}">
+      <input type="hidden" name="action" value="add_question">
+
+      <div class="field">
+        <label>Текст вопроса *</label>
+        <textarea name="q_text" rows="2" required placeholder="Как вы оцениваете..."></textarea>
+      </div>
+
+      <div class="form-row">
+        <div class="field">
+          <label>Тип вопроса</label>
+          <select name="q_type" id="q-type-sel" onchange="updateTypeFields(this.value)">
+            <option value="single">Одиночный выбор</option>
+            <option value="multiple">Множественный выбор</option>
+            <option value="scale">Шкала оценки (eNPS)</option>
+            <option value="text">Текстовый ответ</option>
+            <option value="matrix">Матрица</option>
+          </select>
+        </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px;padding-top:26px">
+          <input type="checkbox" name="q_required" checked id="q-req">
+          <label for="q-req" style="margin-bottom:0">Обязательный</label>
+        </div>
+      </div>
+
+      {# Варианты для single/multiple #}
+      <div id="field-options" class="field">
+
+
+<label>Варианты ответов</label>
+
+<div id="options-builder">
+
+    <div class="option-card" draggable="true">
+        <span class="drag-handle">⋮⋮</span>
+
+        <input
+            type="text"
+            class="option-input"
+            placeholder="Введите вариант ответа">
+
+        <button
+            type="button"
+            class="btn-remove-option">
+            ✕
+        </button>
+    </div>
+
+</div>
+
+<div style="margin-top:10px">
+
+    <button
+        type="button"
+        class="btn btn-ghost btn-sm"
+        onclick="addOption()">
+
+        + Добавить вариант
+
+    </button>
+
+</div>
+
+<input
+    type="hidden"
+    name="options_text"
+    id="options_text">
+
+</div>
+
+
+      {# Строки/столбцы для matrix #}
+      <div id="field-matrix" style="display:none">
+        <div class="field">
+          <label>Строки матрицы (с новой строки)</label>
+          <textarea name="matrix_rows" rows="3" placeholder="Удобство рабочего места&#10;Оснащение техникой"></textarea>
+        </div>
+        <div class="field">
+          <label>Столбцы / оценки (с новой строки)</label>
+          <textarea name="matrix_cols" rows="3" placeholder="Плохо&#10;Нормально&#10;Хорошо"></textarea>
+        </div>
+      </div>
+
+      {# Условие показа #}
+      <details style="margin-bottom:16px">
+        <summary style="font-size:13px;color:var(--text2);cursor:pointer;margin-bottom:8px">
+          ⚙️ Условие показа (conditional logic)
+        </summary>
+        <div class="form-row" style="margin-top:8px">
+          <div class="field">
+            <label>Показывать если ответ на вопрос</label>
+            <select name="cond_question_id">
+              <option value="">— не задано —</option>
+              {% for q in questions %}
+              <option value="{{ q.id }}">{{ loop.index }}. {{ q.text[:50] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label>Оператор</label>
+            <select name="cond_operator">
+              <option value="eq">равно</option>
+              <option value="neq">не равно</option>
+              <option value="gte">≥</option>
+              <option value="lte">≤</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Значение</label>
+          <input type="text" name="cond_value" placeholder="Например: Ответ на 1 вопрос = Руководитель">
+        </div>
+      </details>
+
+      <div style="display:flex;gap:8px">
+        <button type="submit" class="btn btn-primary btn-sm">Добавить вопрос</button>
+        <button type="button" class="btn btn-ghost btn-sm"
+                onclick="document.getElementById('add-q-form').style.display='none';
+                         document.getElementById('add-q-toggle').style.display='block'">
+          Отмена
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function updateTypeFields(type) {
+  document.getElementById('field-options').style.display =
+    ['single','multiple'].includes(type) ? 'block' : 'none';
+  document.getElementById('field-matrix').style.display =
+    type === 'matrix' ? 'block' : 'none';
+}
+function addOption(value=""){
+
+const container =
+    document.getElementById("options-builder");
+
+const card =
+    document.createElement("div");
+
+card.className = "option-card";
+card.draggable = true;
+
+card.innerHTML = `
+    <span class="drag-handle">⋮⋮</span>
+
+    <input
+        type="text"
+        class="option-input"
+        value="${value}"
+        placeholder="Введите вариант ответа">
+
+    <button
+        type="button"
+        class="btn-remove-option">
+        ✕
+    </button>
+`;
+
+container.appendChild(card);
+
+initOptionCard(card);
+
+
+}
+
+function initOptionCard(card){
+
+
+card.querySelector(".btn-remove-option")
+    .addEventListener("click", () => {
+
+        if(document.querySelectorAll(".option-card").length > 1){
+            card.remove();
+        }
+    });
+
+card.addEventListener("dragstart", () => {
+    card.classList.add("dragging");
+});
+
+card.addEventListener("dragend", () => {
+    card.classList.remove("dragging");
+});
+
+
+}
+
+document.addEventListener("dragover", e => {
+
+
+const container =
+    document.getElementById("options-builder");
+
+const dragging =
+    document.querySelector(".dragging");
+
+if(!dragging) return;
+
+e.preventDefault();
+
+const cards =
+    [...container.querySelectorAll(".option-card:not(.dragging)")];
+
+const next = cards.find(card => {
+
+    const rect = card.getBoundingClientRect();
+
+    return e.clientY <
+        rect.top + rect.height / 2;
+});
+
+container.insertBefore(
+    dragging,
+    next || null
+);
+
+
+});
+
+const addQuestionForm =
+    document.querySelector('#add-q-form form');
+
+if (addQuestionForm) {
+
+    addQuestionForm.addEventListener("submit", () => {
+
+        const values =
+            [...document.querySelectorAll("#options-builder .option-input")]
+            .map(i => i.value.trim())
+            .filter(Boolean);
+
+        document.getElementById("options_text")
+            .value = values.join("\n");
+
+    });
+
+}
+document
+.querySelectorAll(".option-card")
+.forEach(initOptionCard);
+
+// Init
+updateTypeFields(document.getElementById('q-type-sel')?.value || 'single');
+</script>
+{% endblock %}

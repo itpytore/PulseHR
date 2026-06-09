@@ -1,0 +1,311 @@
+{# templates/survey.html
+   Страница прохождения опроса.
+   Вопросы рендерятся на стороне сервера, но JS управляет:
+   - conditional logic (показ/скрытие вопросов по ответам)
+   - счётчиком прогресса
+   - AJAX отправкой ответов без перезагрузки.
+   Маршрут Flask: GET /survey/<survey_id>
+#}
+{% extends "base.html" %}
+{% block title %}{{ survey.title }} — PulseHR{% endblock %}
+
+{% block content %}
+<div style="max-width:680px;margin:0 auto">
+
+  {# Шапка опроса #}
+  <div style="margin-bottom:28px">
+    <div class="gap-row mb16">
+      {% if survey.is_anonymous %}<span class="badge badge-accent">🔒 Анонимный</span>{% endif %}
+      <span class="badge badge-default">⏱ ~{{ survey.estimated_minutes }} мин.</span>
+    </div>
+    <h1 style="margin-bottom:8px">{{ survey.title }}</h1>
+    {% if survey.description %}<p class="text2">{{ survey.description }}</p>{% endif %}
+  </div>
+
+  {# Режим конфиденциальности #}
+  {% if survey.is_anonymous %}
+  <div class="alert alert-info">
+    🛡️ Этот опрос анонимный — HR не увидит ваши ответы и не сможет определить автора.
+  </div>
+  {% else %}
+  <div class="alert alert-warning">
+    👤 Ваши ответы будут видны HR с указанием вашего имени.
+  </div>
+  {% endif %}
+
+  {# Экран успеха (скрыт по умолчанию) #}
+  <div id="success-screen" style="display:none;text-align:center;padding:60px 24px">
+    <div style="font-size:64px;margin-bottom:20px">🎉</div>
+    <h2 style="margin-bottom:10px">Спасибо за участие!</h2>
+    <p class="text2" style="margin-bottom:28px">Ваши ответы сохранены и помогут улучшить рабочую среду.</p>
+    <a href="{{ url_for('index') }}" class="btn btn-primary">← На главную</a>
+  </div>
+
+  {# Форма опроса #}
+  <div id="survey-form" style="margin-top:20px">
+    {% for q in questions %}
+    <div class="q-card"
+         id="q-{{ q.id }}"
+         data-qid="{{ q.id }}"
+         data-type="{{ q.type }}"
+         {% if q.condition() %}
+           data-cond='{{ q.condition()|tojson }}'
+           style="display:none"
+         {% endif %}>
+
+      <div class="q-header">
+        <div class="q-num">{{ loop.index }}</div>
+        <div>
+          <div class="q-text">{{ q.text }}</div>
+          {% if q.is_required %}<div class="q-required">* обязательный</div>{% endif %}
+        </div>
+      </div>
+
+      {# Одиночный выбор #}
+      {% if q.type == 'single' %}
+        {% for opt in (q.options() or []) %}
+        <label class="option-label">
+          <input type="radio" name="q_{{ q.id }}" value="{{ opt }}"
+                 onchange="onAnswer('{{ q.id }}', '{{ opt }}')">
+          {{ opt }}
+        </label>
+        {% endfor %}
+
+      {# Множественный выбор #}
+      {% elif q.type == 'multiple' %}
+        {% for opt in (q.options() or []) %}
+        <label class="option-label">
+          <input type="checkbox" name="q_{{ q.id }}" value="{{ opt }}"
+                 onchange="onMultiAnswer('{{ q.id }}')">
+          {{ opt }}
+        </label>
+        {% endfor %}
+
+      {# Шкала eNPS #}
+      {% elif q.type == 'scale' %}
+        <div class="scale-wrap" id="scale-{{ q.id }}">
+          {% for n in (q.options() or range(11)) %}
+          <button type="button" class="scale-btn"
+                  data-val="{{ n }}"
+                  onclick="onScale('{{ q.id }}', {{ n }}, this)">{{ n }}</button>
+          {% endfor %}
+        </div>
+        <div class="scale-labels">
+          <span>Совсем нет</span><span>Определённо да</span>
+        </div>
+
+      {# Текстовый ответ #}
+      {% elif q.type == 'text' %}
+        <textarea rows="4" placeholder="Введите ваш ответ..."
+                  oninput="onAnswer('{{ q.id }}', this.value)"></textarea>
+
+      {# Матричный вопрос #}
+      {% elif q.type == 'matrix' and q.options() %}
+        <div style="overflow-x:auto">
+          <table style="border-collapse:separate;border-spacing:4px">
+            <thead>
+              <tr>
+                <th style="min-width:140px"></th>
+                {% for col in q.options().cols %}
+                <th style="text-align:center;font-size:13px;color:var(--text2);padding:4px 8px">{{ col }}</th>
+                {% endfor %}
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in q.options().rows %}
+              <tr>
+                <td style="font-size:14px;padding:6px 8px">{{ row }}</td>
+                {% for col in q.options().cols %}
+                <td style="text-align:center">
+                  <input type="radio" name="matrix_{{ q.id }}_{{ loop.index0 }}"
+                         value="{{ col }}"
+                         onchange="onMatrix('{{ q.id }}', '{{ row }}', '{{ col }}')">
+                </td>
+                {% endfor %}
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+
+    </div>{# /q-card #}
+    {% endfor %}
+
+    {# Прогресс и кнопка #}
+    <div class="progress-wrap">
+      <div class="progress-info">
+        <span>Прогресс</span>
+        <span id="progress-text">0 / {{ questions|length }}</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+      </div>
+    </div>
+
+    <div id="submit-error" class="alert alert-error" style="display:none;margin-top:12px"></div>
+
+    <button class="btn btn-primary btn-lg" style="width:100%;justify-content:center;margin-top:16px"
+            onclick="submitSurvey()">
+      Отправить ответы ✓
+    </button>
+  </div>{# /survey-form #}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Все вопросы из шаблона для conditional logic
+const QUESTIONS = [
+  {% for q in questions %}
+  { id: "{{ q.id }}", type: "{{ q.type }}", required: {{ 'true' if q.is_required else 'false' }},
+    cond: {{ q.condition()|tojson if q.condition() else 'null' }} },
+  {% endfor %}
+];
+
+const SURVEY_ID = "{{ survey.id }}";
+const answers   = {};          // { question_id: value }
+const matrixAns = {};          // { question_id: { row: col } }
+
+// ── Ответы ────────────────────────────────────────────────────────────────────
+
+function onAnswer(qid, val) {
+  answers[qid] = val;
+  updateConditions();
+  updateProgress();
+}
+
+function onMultiAnswer(qid) {
+  const checks = document.querySelectorAll(`input[name="q_${qid}"]:checked`);
+  answers[qid] = Array.from(checks).map(c => c.value);
+  updateProgress();
+}
+
+function onScale(qid, val, btn) {
+  answers[qid] = val;
+  btn.closest('.scale-wrap').querySelectorAll('.scale-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  updateConditions();
+  updateProgress();
+}
+
+function onMatrix(qid, row, col) {
+  if (!matrixAns[qid]) matrixAns[qid] = {};
+  matrixAns[qid][row] = col;
+  answers[qid] = { ...matrixAns[qid] };
+  updateProgress();
+}
+
+// ── Conditional logic ─────────────────────────────────────────────────────────
+
+function evalCond(cond) {
+  if (!cond) return true;
+  const val = answers[cond.question_id];
+  if (val === undefined || val === null || val === '') return false;
+  switch (cond.operator) {
+    case 'eq':  return String(val) === String(cond.value);
+    case 'neq': return String(val) !== String(cond.value);
+    case 'in':  return Array.isArray(cond.value)
+                  ? (Array.isArray(val) ? val.some(v => cond.value.includes(v)) : cond.value.includes(String(val)))
+                  : false;
+    case 'gte': return parseFloat(val) >= parseFloat(cond.value);
+    case 'lte': return parseFloat(val) <= parseFloat(cond.value);
+    default:    return true;
+  }
+}
+
+function updateConditions() {
+  QUESTIONS.forEach(q => {
+    const el = document.getElementById('q-' + q.id);
+    if (!el) return;
+    const visible = !q.cond || evalCond(q.cond);
+    el.style.display = visible ? 'block' : 'none';
+    if (!visible) delete answers[q.id];  // сбрасываем скрытые ответы
+  });
+}
+
+// ── Прогресс ──────────────────────────────────────────────────────────────────
+
+function updateProgress() {
+  const visible = QUESTIONS.filter(q => {
+    const el = document.getElementById('q-' + q.id);
+    return el && el.style.display !== 'none';
+  });
+  const answered = visible.filter(q => {
+    const v = answers[q.id];
+    return v !== undefined && v !== '' && !(Array.isArray(v) && v.length === 0);
+  });
+  const pct = visible.length ? Math.round(answered.length / visible.length * 100) : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-text').textContent = `${answered.length} / ${visible.length}`;
+}
+
+// ── Submit ────────────────────────────────────────────────────────────────────
+
+async function submitSurvey() {
+  const errEl = document.getElementById('submit-error');
+  errEl.style.display = 'none';
+
+  // Проверка обязательных
+  const visible = QUESTIONS.filter(q => {
+    const el = document.getElementById('q-' + q.id);
+    return el && el.style.display !== 'none';
+  });
+
+  for (const q of visible) {
+    if (!q.required) continue;
+    const v = answers[q.id];
+    if (v === undefined || v === '' || (Array.isArray(v) && v.length === 0)) {
+      const el  = document.getElementById('q-' + q.id);
+      const txt = el.querySelector('.q-text')?.textContent || '';
+      errEl.textContent   = `Ответьте на обязательный вопрос: "${txt.substring(0, 60)}..."`;
+      errEl.style.display = 'block';
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+  }
+
+  const btn = event.currentTarget;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Отправка...';
+
+  const res  = await postJSON(`/survey/${SURVEY_ID}/submit`, {
+    answers:      answers,
+    time_spent:   Math.round((Date.now() - window._startTime) / 1000),
+  });
+  const data = await res.json();
+
+  if (data.ok) {
+    document.getElementById('survey-form').style.display   = 'none';
+    document.getElementById('success-screen').style.display = 'block';
+  } else {
+    errEl.textContent   = data.error || 'Ошибка отправки';
+    errEl.style.display = 'block';
+    btn.disabled        = false;
+    btn.innerHTML       = 'Отправить ответы ✓';
+  }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+window._startTime = Date.now();
+// Инициализируем видимость вопросов (с condition сразу скрыты через style)
+updateConditions();
+
+// Подсвечиваем selected option при клике
+document.querySelectorAll('.option-label input').forEach(inp => {
+  inp.addEventListener('change', function () {
+    const name    = this.name;
+    const isRadio = this.type === 'radio';
+    if (isRadio) {
+      document.querySelectorAll(`input[name="${name}"]`).forEach(i => {
+        i.closest('.option-label').classList.remove('selected');
+      });
+    }
+    if (this.checked) this.closest('.option-label').classList.add('selected');
+    else              this.closest('.option-label').classList.remove('selected');
+  });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,85 @@
+{# templates/index.html
+   Главная страница сотрудника.
+   Показывает: приветствие, счётчики, список активных и пройденных опросов.
+   Маршрут Flask: GET /
+#}
+{% extends "base.html" %}
+{% block title %}Главная — PulseHR{% endblock %}
+
+{% block content %}
+{# Приветствие #}
+<div style="margin-bottom:28px">
+  <h1>Добрый день, {{ current_user.name.split()[0] }} 👋</h1>
+  <p class="text2" style="margin-top:6px">
+    {% if active %}
+      У вас {{ active|length }} активных опрос{{ 'а' if active|length in [2,3,4] else '' }} — ваше мнение важно!
+    {% else %}
+      Новых опросов нет. Загляните позже.
+    {% endif %}
+  </p>
+</div>
+
+{# Счётчики #}
+<div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+  <div class="stat-card">
+    <div class="val" style="color:var(--accent)">{{ active|length }}</div>
+    <div class="lbl">Ожидают ответа</div>
+  </div>
+  <div class="stat-card">
+    <div class="val" style="color:var(--green)">{{ completed|length }}</div>
+    <div class="lbl">Пройдено</div>
+  </div>
+  <div class="stat-card">
+    <div class="val" style="color:var(--text2)">{{ total }}</div>
+    <div class="lbl">Всего опросов</div>
+  </div>
+</div>
+
+{# Активные опросы #}
+{% if active %}
+<h2 style="margin-bottom:14px">📋 Активные опросы</h2>
+<div class="gap-col mb24">
+  {% for s in active %}
+  <div class="survey-card pending">
+    <div class="info">
+      <div class="title">
+        {{ s.title }}
+        {% if s.is_anonymous %}<span class="badge badge-accent" style="margin-left:6px">Анонимный</span>{% endif %}
+      </div>
+      {% if s.description %}<div class="text2" style="font-size:13px;margin:4px 0">{{ s.description }}</div>{% endif %}
+      <div class="meta">
+        <span>⏱ ~{{ s.estimated_minutes }} мин.</span>
+        {% if s.days_left() is not none %}
+          <span style="color:{{ 'var(--orange)' if s.days_left() <= 1 else 'var(--text3)' }}">
+            📅 {{ 'Последний день!' if s.days_left() == 0 else s.days_left()|string + ' д. осталось' }}
+          </span>
+        {% endif %}
+      </div>
+    </div>
+    <a href="{{ url_for('take_survey', survey_id=s.id) }}" class="btn btn-primary">
+      Пройти →
+    </a>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# Пройденные #}
+{% if completed %}
+<h2 style="margin-bottom:14px">✅ Пройденные</h2>
+<div class="gap-col">
+  {% for s in completed %}
+  <div class="survey-card done">
+    <div class="info">
+      <div class="title">{{ s.title }} <span class="badge badge-green">✓ Пройден</span></div>
+      <div class="meta"><span>⏱ ~{{ s.estimated_minutes }} мин.</span></div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if not active and not completed %}
+<div class="empty"><div class="ico">📭</div>Опросов пока нет</div>
+{% endif %}
+{% endblock %}
